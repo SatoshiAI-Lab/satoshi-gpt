@@ -129,6 +129,7 @@ env.bak/
 venv.bak/
 /db/
 /apis/intent_api.py
+datasource/*.py
 
 # Spyder project settings
 .spyderproject
