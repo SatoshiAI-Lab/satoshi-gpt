@@ -130,11 +130,83 @@ async def question_event(ctx: Context):
 
     
     if res_classify == "2":
-        yield ResponseChunk(
-            answer_type="chat_stream",
-            text="pledge server is comming soon",
+        
+        tools_res = await gpt_tools_no_stream(
+            transaction_system, ctx.question, transaction_tools, intent_history
         )
-        return
+        if "tool_calls" in tools_res:
+            if tools_res.tool_calls[0].function.name == "get_transaction_info":
+                from_token = json.loads(tools_res.tool_calls[0].function.arguments)[
+                    "from_token"
+                ]
+                from_amount = json.loads(tools_res.tool_calls[0].function.arguments)[
+                    "from_amount"
+                ]
+                to_token = json.loads(tools_res.tool_calls[0].function.arguments)[
+                    "to_token"
+                ]
+
+                
+                (
+                    from_token_contract,
+                    to_token_contract,
+                ) = await prepare.get_token_contract(from_token, to_token)
+                if not from_token_contract:
+                    yield ResponseChunk(
+                        answer_type="chat_stream",
+                        text=mult_lang.intent[ctx.global_.language][
+                            "wrong_token_name"
+                        ].format(from_token),
+                    )
+                    return
+                if not to_token_contract:
+                    yield ResponseChunk(
+                        answer_type="chat_stream",
+                        text=mult_lang.intent[ctx.global_.language][
+                            "wrong_token_name"
+                        ].format(to_token),
+                    )
+                    return
+
+                meta = {
+                    "from_token_contract": from_token_contract,
+                    "from_token_name": from_token,
+                    "from_amount": from_amount,
+                    "to_token_contract": to_token_contract,
+                    "to_token_name": to_token,
+                }
+
+                
+                yield ResponseChunk(
+                    answer_type="transaction_stream",
+                    text=mult_lang.intent[ctx.global_.language]["transaction"][
+                        "confirm"
+                    ].format(from_amount, from_token, to_token),
+                    meta={"status": 200, "data": meta},
+                )
+                return
+
+            
+            if tools_res.tool_calls[0].function.name == "get_staking_info":
+                yield ResponseChunk(
+                    answer_type="chat_stream",
+                    text="comming soon...",
+                )
+                return
+
+            
+            if tools_res.tool_calls[0].function.name == "get_nft_info":
+                yield ResponseChunk(
+                    answer_type="chat_stream",
+                    text="NFT交易服务还在开发中...",
+                )
+                return
+        else:
+            yield ResponseChunk(
+                answer_type="intent_stream_2",
+                text=tools_res.content,
+            )
+            return
 
     
     if res_classify == "3":
