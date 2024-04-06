@@ -24,7 +24,31 @@ transaction_tools = [
                 "required": ["from_token", "from_amount", "to_token"],
             },
         },
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_staking_info",
+            "description": "Get complete staking token information",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_nft_info",
+            "description": "Get complete nft transaction information",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
 ]
 transaction_system = "Don't make assumptions about what values to plug into functions. Ask for clarification if a user request is ambiguous.Please specify the amount of from_token you are willing to use for purchasing to_token. "
 # "To proceed with your transaction, please specify the amount of from_token you are willing to use for purchasing to_token. "
