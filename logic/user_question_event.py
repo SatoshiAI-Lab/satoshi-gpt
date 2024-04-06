@@ -6,7 +6,7 @@ from ai.GPT import (
     gpt_gen_template_text,
     gpt_tools_no_stream,
 )
-from apis.intent_api import create_wallet_api, import_private_key_api, wallet_list_api
+from apis.intent_api import create_wallet_api, import_private_key_api, wallet_list_api,get_wallet_balance
 from datasource.active_infos import (
     get_active_infos_by_embedding,
     get_active_infos_by_time,
@@ -42,6 +42,8 @@ from prompts.tools import (
     transaction_system,
     create_wallet_tools,
     create_wallet_system,
+    contract_system,
+    contract_tools
 )
 from utils import mult_lang
 
@@ -359,7 +361,55 @@ async def question_event(ctx: Context):
         )
         return
 
+        
+    if res_classify == "7":
+        if not solana_contract:
+            yield ResponseChunk(
+                answer_type="wrong_contract",
+                text=mult_lang.intent[ctx.global_.language]["wrong_contract"],
+                meta={
+                    "type": "no_contract_address",
+                    "status": 200,
+                    "data": {}
+                },
+            )
+            return
+        
+        tools_res = await gpt_tools_no_stream(
+                contract_system, ctx.question, contract_tools, intent_history
+        )
 
+        if "tool_calls" in tools_res:
+            
+            if tools_res.tool_calls[0].function.name == "only_contract_address":
+
+                wallet_balance = await get_wallet_balance(
+                    ctx.global_.access_token, solana_contract
+                )
+                if not wallet_balance["status"] == 200:
+                    yield ResponseChunk(
+                        answer_type="wrong_contract",
+                        text=mult_lang.intent[ctx.global_.language]["wrong_contract"],
+                        meta={
+                            "type": "",
+                            "status": wallet_balance["status"],
+                            "data": wallet_balance["data"],
+                        },
+                    )
+                    return
+
+                yield ResponseChunk(
+                    answer_type="intent_history",  
+                    text=mult_lang.intent[ctx.global_.language]["contract"][
+                        "contract_balance"
+                    ],
+                    meta={
+                        "type": "contract_wallet_balance",
+                        "status": wallet_balance["status"],
+                        "data": wallet_balance["data"],
+                    },
+                )
+                return
 
     inter_resp, ctx.entities = prepare.entity_extract(ctx)
     if inter_resp:

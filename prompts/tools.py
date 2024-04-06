@@ -108,3 +108,39 @@ create_wallet_tools = [
 ]
 # Please specify the chain in which the user wants to create a wallet.
 create_wallet_system = "Don't make assumptions about what values to plug into functions. Ask for clarification if a user request is ambiguous.The current version only supports creating wallets for Solana and ETH chains.Do not mention the security issues related to the private key."
+
+
+contract_tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "only_contract_address",
+            "description": "User only provides a contract address,without any further information",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "make_transaction",
+            "description": "User wants to make transactions, Optional,user can provides the amount they wish to trade",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "amount": {
+                        "type": "number",
+                        "description": "The amount of token that the user wants to trade with",
+                        "minimum": 0.000000001,
+                        "default":0
+                    },
+                },
+                "required": ["amount"],
+            },
+        },
+    },
+]
+contract_system = "Reply as concise as possible, no more than 20 words."
