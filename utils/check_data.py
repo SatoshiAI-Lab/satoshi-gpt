@@ -73,3 +73,18 @@ def find_contract_address_solana(input_string):
     else:
         return None
 
+def check_which_subscript(input_str: str):
+    subscript_class = {
+        ("twitter", "推特"): "twitter",
+        ("wallet", "钱包"): "trade",
+        ("news", "新闻"): "news",
+        ("cex", "dex", "exchange", "announcement", "公告", "交易所"): "exchange",
+        ("pool", "池子"): "pool",
+    }
+
+    for key, value in subscript_class.items():
+        for k in key:
+            if k in input_str:
+                return value
+
+    return None
