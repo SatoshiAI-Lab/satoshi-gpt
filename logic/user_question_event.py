@@ -55,6 +55,11 @@ async def question_event(ctx: Context):
         intent_history, ctx.intent_stream = await get_history_intent(
             ctx.global_.uuid, ctx.intent_stream
         )
+
+     if ctx.intent_stream == "intent_history":
+        intent_history, ctx.intent_stream = await get_history_intent(
+            ctx.global_.uuid, ctx.intent_stream
+        )
     
     if not ctx.intent_stream.startswith("intent_stream"):
         solana_contract = find_contract_address_solana(ctx.question)
@@ -68,69 +73,6 @@ async def question_event(ctx: Context):
             res_classify = extract_first_number(classify_num)
 
     
-    if res_classify == "1":
-        
-        tools_res = await gpt_tools_no_stream(
-            transaction_system, ctx.question, transaction_tools, intent_history
-        )
-        if "tool_calls" in tools_res:
-            from_token = json.loads(tools_res.tool_calls[0].function.arguments)[
-                "from_token"
-            ]
-            from_amount = json.loads(tools_res.tool_calls[0].function.arguments)[
-                "from_amount"
-            ]
-            to_token = json.loads(tools_res.tool_calls[0].function.arguments)[
-                "to_token"
-            ]
-
-            
-            from_token_contract, to_token_contract = await prepare.get_token_contract(
-                from_token, to_token
-            )
-            if not from_token_contract:
-                yield ResponseChunk(
-                    answer_type="chat_stream",
-                    text=mult_lang.intent[ctx.global_.language][
-                        "wrong_token_name"
-                    ].format(from_token),
-                )
-                return
-            if not to_token_contract:
-                yield ResponseChunk(
-                    answer_type="chat_stream",
-                    text=mult_lang.intent[ctx.global_.language][
-                        "wrong_token_name"
-                    ].format(to_token),
-                )
-                return
-
-            meta = {
-                "from_token_contract": from_token_contract,
-                "from_token_name": from_token,
-                "from_amount": from_amount,
-                "to_token_contract": to_token_contract,
-                "to_token_name": to_token,
-            }
-
-            
-            yield ResponseChunk(
-                answer_type="transaction_stream",
-                text=mult_lang.intent[ctx.global_.language]["transaction"][
-                    "confirm"
-                ].format(from_amount, from_token, to_token),
-                meta=meta,
-            )
-            return
-
-        else:
-            yield ResponseChunk(
-                answer_type="intent_stream_1",
-                text=tools_res.content,
-            )
-            return
-
-    
     if res_classify == "2":
         
         tools_res = await gpt_tools_no_stream(
@@ -138,16 +80,14 @@ async def question_event(ctx: Context):
         )
         if "tool_calls" in tools_res:
             if tools_res.tool_calls[0].function.name == "get_transaction_info":
-                from_token = json.loads(tools_res.tool_calls[0].function.arguments)[
-                    "from_token"
-                ]
+                
+                from_token = "SOL"
                 from_amount = json.loads(tools_res.tool_calls[0].function.arguments)[
                     "from_amount"
                 ]
                 to_token = json.loads(tools_res.tool_calls[0].function.arguments)[
                     "to_token"
                 ]
-
                 
                 (
                     from_token_contract,
@@ -178,7 +118,6 @@ async def question_event(ctx: Context):
                     "to_token_name": to_token,
                 }
 
-                
                 yield ResponseChunk(
                     answer_type="transaction_stream",
                     text=mult_lang.intent[ctx.global_.language]["transaction"][
@@ -195,12 +134,11 @@ async def question_event(ctx: Context):
                     text="comming soon...",
                 )
                 return
-
             
             if tools_res.tool_calls[0].function.name == "get_nft_info":
                 yield ResponseChunk(
                     answer_type="chat_stream",
-                    text="NFT交易服务还在开发中...",
+                    text="comming soon...",
                 )
                 return
         else:
@@ -211,7 +149,161 @@ async def question_event(ctx: Context):
             return
 
     
-    if res_classify == "3":
+    if res_classify == "3" or res_classify == "0":
+        
+        tools_res = await gpt_tools_no_stream(
+            wallet_system, ctx.question, wallet_tools, intent_history
+        )
+
+        if "tool_calls" in tools_res:
+            
+            if tools_res.tool_calls[0].function.name == "get_chain_name":
+                chain_name = json.loads(tools_res.tool_calls[0].function.arguments)[
+                    "chain_name"
+                ]
+
+                format_chain_name = prepare.get_format_chain_name(str(chain_name))
+                if not format_chain_name:
+                    yield ResponseChunk(
+                        answer_type="intent_stream_3",
+                        text=mult_lang.intent[ctx.global_.language][
+                            "wrong_chain_name"
+                        ].format(chain_name),
+                        meta={
+                            "type": "wrong_chain_name",
+                            "status": 401,
+                            "data": {"message": "Only support SOL and EVM"},
+                        },
+                    )
+                    return
+                
+                create_res = await create_wallet_api(
+                    format_chain_name, ctx.global_.access_token
+                )
+
+                text = (
+                    mult_lang.intent[ctx.global_.language]["wallet"][
+                        "create_success"
+                    ].format(create_res["data"]["name"], create_res["data"]["address"])
+                    if create_res["status"] == 200
+                    else mult_lang.intent[ctx.global_.language]["wallet"]["create_fail"]
+                )
+                type_str = "wallet_list" if create_res["status"] == 200 else ""
+                
+                yield ResponseChunk(
+                    answer_type="intent_stream_0",
+                    text=text,
+                    meta={
+                        "type": type_str,
+                        "status": create_res["status"],
+                        "data": [create_res["data"]],
+                    },
+                )
+                return
+
+            if tools_res.tool_calls[0].function.name == "get_wallet_list":
+                
+                wallet_list_res = await wallet_list_api(
+                    access_token=ctx.global_.access_token
+                )
+
+                if wallet_list_res["status"] == 200:
+                    if len(wallet_list_res["data"]) >= 1:
+                        text = mult_lang.intent[ctx.global_.language]["wallet"][
+                            "wallet_list_success"
+                        ]
+                        type_str = "wallet_list"
+                    else:
+                        text = mult_lang.intent[ctx.global_.language]["wallet"][
+                            "do_not_have_wallet"
+                        ]
+                        type_str = ""
+                else:
+                    text = mult_lang.intent[ctx.global_.language]["wallet"][
+                        "wallet_list_fail"
+                    ]
+                    type_str = "get_wallet_list_wrong"
+
+                yield ResponseChunk(
+                    answer_type="wallet_list_stream",
+                    text=text,
+                    meta={
+                        "type": type_str,
+                        "status": wallet_list_res["status"],
+                        "data": wallet_list_res["data"],
+                    },
+                )
+                return
+
+            if tools_res.tool_calls[0].function.name == "change_wallet_name":
+                current_name = json.loads(tools_res.tool_calls[0].function.arguments)[
+                    "current_name"
+                ]
+                new_name = json.loads(tools_res.tool_calls[0].function.arguments)[
+                    "new_name"
+                ]
+
+                wallet_list_res = await wallet_list_api(
+                    access_token=ctx.global_.access_token
+                )
+
+                if not wallet_list_res["status"] == 200:
+                    yield ResponseChunk(
+                        answer_type="intent_stream_3",
+                        text=mult_lang.intent[ctx.global_.language]["wallet"][
+                            "update_wallet_name_fail"
+                        ],
+                        meta={
+                            "type": "get_wallet_list_wrong",
+                            "status": wallet_list_res["status"],
+                            "data": wallet_list_res["data"],
+                        },
+                    )
+                    return
+
+                wallet_id = get_wallet_id_by_wallet_name(
+                    current_name, wallet_list_res["data"]
+                )
+                if not wallet_id:
+                    yield ResponseChunk(
+                        answer_type="intent_stream_3",
+                        text=mult_lang.intent[ctx.global_.language][
+                            "wrong_wallet_name"
+                        ],
+                        meta={
+                            "type": "change_name_wallet_list",
+                            "status": 200,
+                            "data": wallet_list_res["data"],
+                        },
+                    )
+                    return
+                
+                update_wallet_name_res = await update_wallet_name_api(
+                    ctx.global_.access_token, wallet_id, new_name
+                )
+                text = (
+                    mult_lang.intent[ctx.global_.language]["wallet"][
+                        "update_wallet_name_success"
+                    ].format(current_name, update_wallet_name_res["data"]["name"])
+                    if update_wallet_name_res["status"] == 200
+                    else mult_lang.intent[ctx.global_.language]["wallet"][
+                        "update_wallet_name_fail"
+                    ]
+                )
+                
+                yield ResponseChunk(
+                    answer_type="update_wallet_name_stream",
+                    text=text,
+                    meta={
+                        "type": "",
+                        "status": update_wallet_name_res["status"],
+                        "data": update_wallet_name_res["data"],
+                    },
+                )
+                return
+
+    
+    if res_classify == "4":
         yield ResponseChunk(
             answer_type="chat_stream",
             text="NFT server is comming soon",
@@ -219,7 +311,7 @@ async def question_event(ctx: Context):
         return
 
     
-    if res_classify == "4":
+    if res_classify == "5":
         
         tools_res = await gpt_tools_no_stream(
             create_wallet_system, ctx.question, create_wallet_tools, intent_history
