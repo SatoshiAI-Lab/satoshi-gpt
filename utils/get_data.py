@@ -16,6 +16,55 @@ def get_wallet_id_by_wallet_name(wallet_name: str, wallet_list: list):
 
     return None
 
+def get_wallet_list_have_sol(wallet_list: list):
+    ret_wallet_list = []
+    for wallet in wallet_list:
+        for token in wallet["tokens"]:
+            if token["symbol"] and token["name"]:
+                if (
+                    token["symbol"].upper() == "SOL"
+                    and token["name"].upper() == "SOLANA"
+                    and token["amount"] > 0
+                ):
+                    ret_wallet_list.append(wallet)
+
+    return ret_wallet_list
+
+
+def get_wallet_list_by_token_contract(token_contract: str, wallet_list: list):
+    ret_wallet_list = []
+    for wallet in wallet_list:
+        for token in wallet["tokens"]:
+            if token["address"] == token_contract:
+                ret_wallet_list.append(wallet)
+
+    return ret_wallet_list
+
+def get_class_by_question(question: str):
+    wallet = ["balance", "余额"]
+
+    if wallet[0] in question:
+        return "wallet balances"
+
+    if wallet[1] in question:
+        return "钱包余额"
+
+    return None
+
+
+def get_wallet_list_have_sol(wallet_list: list):
+    ret_wallet_list = []
+    for wallet in wallet_list:
+        for token in wallet["tokens"]:
+            if token["symbol"] and token["name"]:
+                if (
+                    token["symbol"].upper() == "SOL"
+                    and token["name"].upper() == "SOLANA"
+                    and token["amount"] > 0
+                ):
+                    ret_wallet_list.append(wallet)
+
+    return ret_wallet_list
 
 def get_wallet_id_by_question(question: str, wallet_list: list):
     for item in wallet_list:

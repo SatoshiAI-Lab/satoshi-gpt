@@ -158,6 +158,8 @@ class Context(BaseModel):
 
         language: Literal["zh", "en"] = "zh"
 
+        access_token:str=""
+
     global_: Global = Global()
     selected_entities: list[Entity] = []
     stream: bool = False
@@ -191,6 +193,8 @@ class Context(BaseModel):
     help_requirement: bool = False
     filter_requirement: bool = False
     short_info_requirement: bool = False
+    
+    intent_stream:str=""
 
 
 class GPTMessage(BaseModel):

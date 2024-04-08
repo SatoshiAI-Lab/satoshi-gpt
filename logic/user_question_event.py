@@ -50,11 +50,12 @@ from prompts.tools import (
     subscript_system
 )
 from utils import mult_lang
-from utils.get_data import get_exchange_id, get_people_twitter_id, get_wallet_id_by_wallet_name
+from utils.get_data import get_class_by_question, get_exchange_id, get_people_twitter_id, get_wallet_id_by_wallet_name, get_wallet_list_by_token_contract, get_wallet_list_have_sol
 
 async def question_event(ctx: Context):
     intent_history = []
     solana_contract: str | None = None
+    
     if ctx.intent_stream and ctx.intent_stream.startswith("intent_stream"):
         res_classify = str(ctx.intent_stream)[-1]
         intent_history, ctx.intent_stream = await get_history_intent(
@@ -68,10 +69,13 @@ async def question_event(ctx: Context):
     
     if not ctx.intent_stream.startswith("intent_stream"):
         solana_contract = find_contract_address_solana(ctx.question)
+        wallet_balances = get_class_by_question(ctx.question)
         if solana_contract:  
             res_classify = "6"
+        elif wallet_balances: 
+            res_classify = "3"
+            ctx.question = wallet_balances
         else:
-            
             classify_num = await gpt_gen_template_text(
                 ctx, "gpt_classify_intent_or_not"
             )
@@ -84,28 +88,91 @@ async def question_event(ctx: Context):
             transaction_system, ctx.question, transaction_tools, intent_history
         )
         if "tool_calls" in tools_res:
-            if tools_res.tool_calls[0].function.name == "get_transaction_info":
-                
+            if tools_res.tool_calls[0].function.name == "get_buy_coin_name":
                 from_token = "SOL"
-                from_amount = json.loads(tools_res.tool_calls[0].function.arguments)[
-                    "from_amount"
-                ]
+                from_amount = 0
+
                 to_token = json.loads(tools_res.tool_calls[0].function.arguments)[
-                    "to_token"
+                    "buy_coin_name"
                 ]
+
+                try:
+                    from_amount = json.loads(
+                        tools_res.tool_calls[0].function.arguments
+                    )["from_amount"]
+                except:
+                    from_amount = 0
+
                 
-                (
-                    from_token_contract,
-                    to_token_contract,
-                ) = await prepare.get_token_contract(from_token, to_token)
-                if not from_token_contract:
+                to_token = "USDT" if to_token.upper == "U" else to_token
+
+                
+                if (
+                    "SOL" == to_token.upper()
+                    or "SOLANA" == to_token.upper()
+                    or "索拉" in to_token
+                ):
                     yield ResponseChunk(
-                        answer_type="chat_stream",
-                        text=mult_lang.intent[ctx.global_.language][
-                            "wrong_token_name"
-                        ].format(from_token),
+                        answer_type="do_not_support_buy_token",
+                        text=mult_lang.intent[ctx.global_.language]["transaction"][
+                            "do_not_support_buy_token"
+                        ],
+                        meta={
+                            "type": "do_not_support_buy_token",
+                            "status": 200,
+                            "data": {},
+                        },
                     )
                     return
+
+                
+                wallet_list_res = await wallet_list_api(
+                    access_token=ctx.global_.access_token
+                )
+
+                
+                if not wallet_list_res["status"] == 200:
+                    yield ResponseChunk(
+                        answer_type="get_wallet_wrong",
+                        text=mult_lang.intent[ctx.global_.language]["contract"][
+                            "transaction_fail"
+                        ],
+                        meta={
+                            "type": "contract_transaction_fail",
+                            "status": wallet_list_res["status"],
+                            "data": wallet_list_res["data"],
+                        },
+                    )
+                    return
+
+                if len(wallet_list_res["data"]) < 1:
+                    yield ResponseChunk(
+                        answer_type="chat_stream",
+                        text=mult_lang.intent[ctx.global_.language]["wallet"][
+                            "do_not_have_wallet"
+                        ],
+                        meta={"type": "", "status": 200, "data": {}},
+                    )
+                    return
+                
+                have_sol_wallets = get_wallet_list_have_sol(wallet_list_res["data"])
+                
+                if not have_sol_wallets:
+                    yield ResponseChunk(
+                        answer_type="chat_stream",
+                        text=mult_lang.intent[ctx.global_.language]["transaction"][
+                            "do_not_have_sol"
+                        ],
+                        meta={
+                            "type": "wallet_list",
+                            "status": 200,
+                            "data": {},
+                        },
+                    )
+                    return
+                
+                to_token_contract = await prepare.get_token_contract_by_name(to_token)
+
                 if not to_token_contract:
                     yield ResponseChunk(
                         answer_type="chat_stream",
@@ -115,37 +182,150 @@ async def question_event(ctx: Context):
                     )
                     return
 
-                meta = {
-                    "from_token_contract": from_token_contract,
-                    "from_token_name": from_token,
-                    "from_amount": from_amount,
-                    "to_token_contract": to_token_contract,
-                    "to_token_name": to_token,
-                }
-
                 yield ResponseChunk(
-                    answer_type="transaction_stream",
-                    text=mult_lang.intent[ctx.global_.language]["transaction"][
-                        "confirm"
-                    ].format(from_amount, from_token, to_token),
-                    meta={"status": 200, "data": meta},
+                    answer_type="transaction_confirm_stream",
+                    text=mult_lang.intent[ctx.global_.language]["contract"][
+                        "transaction_confirm"
+                    ],
+                    meta={
+                        "type": "transaction_confirm_buy",
+                        "status": 200,
+                        "data": {
+                            "from_token_name": "SOL",
+                            "from_token_contract": "So11111111111111111111111111111111111111112",
+                            "amount": from_amount,
+                            "to_token_name": to_token,
+                            "to_token_contract": to_token_contract,
+                            "match_wallets": [],
+                            "address_filter": [
+                                "11111111111111111111111111111111",
+                                "So11111111111111111111111111111111111111112",
+                            ],
+                            "chain_filter": {"platform": "SOL", "chain_name": "Solana"},
+                        },
+                    },
                 )
                 return
 
-            
-            if tools_res.tool_calls[0].function.name == "get_staking_info":
+            if tools_res.tool_calls[0].function.name == "get_sell_coin_name":
+                to_token = "SOL"
+                to_amount = 0
+
+                from_token = json.loads(tools_res.tool_calls[0].function.arguments)[
+                    "sell_coin_name"
+                ]
+
+                
+                from_token = "USDT" if from_token.upper == "U" else from_token
+
+                
+                if (
+                    "SOL" == from_token.upper()
+                    or "SOLANA" == from_token.upper()
+                    or "索拉" in from_token
+                ):
+                    yield ResponseChunk(
+                        answer_type="do_not_support_sell_token",
+                        text=mult_lang.intent[ctx.global_.language]["transaction"][
+                            "do_not_support_sell_token"
+                        ],
+                        meta={
+                            "type": "do_not_support_sell_token",
+                            "status": 200,
+                            "data": {},
+                        },
+                    )
+                    return
+
+                
+                wallet_list_res = await wallet_list_api(
+                    access_token=ctx.global_.access_token
+                )
+
+                
+                if not wallet_list_res["status"] == 200:
+                    yield ResponseChunk(
+                        answer_type="get_wallet_wrong",
+                        text=mult_lang.intent[ctx.global_.language]["contract"][
+                            "transaction_fail"
+                        ],
+                        meta={
+                            "type": "contract_transaction_fail",
+                            "status": wallet_list_res["status"],
+                            "data": wallet_list_res["data"],
+                        },
+                    )
+                    return
+
+                
+                if len(wallet_list_res["data"]) < 1:
+                    yield ResponseChunk(
+                        answer_type="chat_stream",
+                        text=mult_lang.intent[ctx.global_.language]["wallet"][
+                            "do_not_have_wallet"
+                        ],
+                        meta={"type": "", "status": 200, "data": {}},
+                    )
+                    return
+
+                
+                from_token_contract = await prepare.get_token_contract_by_name(
+                    from_token
+                )
+
+                
+                if not from_token_contract:
+                    yield ResponseChunk(
+                        answer_type="chat_stream",
+                        text=mult_lang.intent[ctx.global_.language][
+                            "wrong_token_name"
+                        ].format(to_token),
+                    )
+                    return
+
+                
+                match_wallets = get_wallet_list_by_token_contract(
+                    from_token_contract, wallet_list_res["data"]
+                )
+
+                
+                if not match_wallets:
+                    yield ResponseChunk(
+                        answer_type="do_not_have_token",
+                        text=mult_lang.intent[ctx.global_.language]["transaction"][
+                            "do_not_have_token"
+                        ],
+                        meta={
+                            "type": "wallet_list",
+                            "status": 200,
+                            "data": {},
+                        },
+                    )
+                    return
+
+                
                 yield ResponseChunk(
-                    answer_type="chat_stream",
-                    text="comming soon...",
+                    answer_type="transaction_confirm_stream",
+                    text=mult_lang.intent[ctx.global_.language]["contract"][
+                        "transaction_confirm"
+                    ],
+                    meta={
+                        "type": "transaction_confirm_sell",
+                        "status": 200,
+                        "data": {
+                            "from_token_name": from_token,
+                            "from_token_contract": from_token_contract,
+                            "amount": to_amount,
+                            "to_token_name": "SOL",
+                            "to_token_contract": "So11111111111111111111111111111111111111112",
+                            "match_wallets": [],
+                            "address_filter": [from_token_contract],
+                            "chain_filter": {"platform": "SOL", "chain_name": "Solana"},
+                        },
+                    },
                 )
                 return
-            
-            if tools_res.tool_calls[0].function.name == "get_nft_info":
-                yield ResponseChunk(
-                    answer_type="chat_stream",
-                    text="comming soon...",
-                )
-                return
+
         else:
             yield ResponseChunk(
                 answer_type="intent_stream_2",
@@ -583,26 +763,56 @@ async def question_event(ctx: Context):
     
     if res_classify == "6":
         
-        if solana_contract:
-            token_info = await prepare.get_token_by_contract(solana_contract)
-            if token_info:
-                name, symbol, price, percent_change_24_h = token_info
-                percent_change_24_h = round(percent_change_24_h[0], 2)
-                yield ResponseChunk(
-                    answer_type="contract_stream",
-                    text=f"{name[0]}({symbol[0]}), ${price[0]},  {percent_change_24_h}%",
-                    meta={
-                        "contract": solana_contract,
-                        "token_name": name[0],
-                        "token_symbol": symbol[0],
-                        "price": price[0],
-                        "percent_change_24_h": percent_change_24_h,
+        wallet_list_res = await wallet_list_api(access_token=ctx.global_.access_token)
+
+        if not wallet_list_res["status"] == 200:
+            yield ResponseChunk(
+                answer_type="get_wallet_wrong",
+                text=mult_lang.intent[ctx.global_.language]["contract"][
+                    "transaction_fail"
+                ],
+                meta={
+                    "type": "contract_transaction_fail",
+                    "status": wallet_list_res["status"],
+                    "data": wallet_list_res["data"],
+                },
+            )
+            return
+
+       
+        if len(wallet_list_res["data"]) < 1:
+           
+            create_res = await create_wallet_api("Solana", ctx.global_.access_token)
+            if not create_res["status"] == 200:
+                create_res = await create_wallet_api("Solana", ctx.global_.access_token)
+                wallet_name = create_res["data"]["name"]
+                wallet_address = create_res["data"]["address"]
+
+            wallet_name = create_res["data"]["name"]
+            wallet_address = create_res["data"]["address"]
+
+            yield ResponseChunk(
+                answer_type="chat_stream",
+                text=mult_lang.intent[ctx.global_.language]["create_token"][
+                    "create_confirm"
+                ],
+                meta={
+                    "type": "create_token_no_wallet",
+                    "status": 200,
+                    "data": {
+                        "wallet_name": wallet_name,
+                        "wallet_address": wallet_address,
                     },
-                )
+                },
+            )
+            return
 
         yield ResponseChunk(
             answer_type="chat_stream",
-            text="wrong solana contract address",
+            text=mult_lang.intent[ctx.global_.language]["create_token"][
+                "create_confirm"
+            ],
+            meta={"type": "create_token_have_wallet", "status": 200, "data": {}},
         )
         return
 
@@ -655,6 +865,277 @@ async def question_event(ctx: Context):
                     },
                 )
                 return
+
+         
+            if tools_res.tool_calls[0].function.name == "buying_transaction":
+                from_token = "SOL"
+                from_amount = 0
+                
+                from_amount = json.loads(tools_res.tool_calls[0].function.arguments)[
+                    "from_amount"
+                ]
+                
+
+                
+                if (
+                    solana_contract == "So11111111111111111111111111111111111111112"
+                    or solana_contract == "11111111111111111111111111111111"
+                ):
+                    yield ResponseChunk(
+                        answer_type="do_not_support_buy_token",
+                        text=mult_lang.intent[ctx.global_.language]["transaction"][
+                            "do_not_support_buy_token"
+                        ],
+                        meta={
+                            "type": "do_not_support_buy_token",
+                            "status": 200,
+                            "data": {},
+                        },
+                    )
+                    return
+
+                
+                wallet_list_res = await wallet_list_api(
+                    access_token=ctx.global_.access_token
+                )
+
+                
+                if not wallet_list_res["status"] == 200:
+                    yield ResponseChunk(
+                        answer_type="get_wallet_wrong",
+                        text=mult_lang.intent[ctx.global_.language]["contract"][
+                            "transaction_fail"
+                        ],
+                        meta={
+                            "type": "contract_transaction_fail",
+                            "status": wallet_list_res["status"],
+                            "data": wallet_list_res["data"],
+                        },
+                    )
+                    return
+
+                
+                if len(wallet_list_res["data"]) < 1:
+                    yield ResponseChunk(
+                        answer_type="chat_stream",
+                        text=mult_lang.intent[ctx.global_.language]["wallet"][
+                            "do_not_have_wallet"
+                        ],
+                        meta={"type": "", "status": 200, "data": {}},
+                    )
+                    return
+
+                
+                have_sol_wallets = get_wallet_list_have_sol(wallet_list_res["data"])
+
+                
+                if not have_sol_wallets:
+                    yield ResponseChunk(
+                        answer_type="chat_stream",
+                        text=mult_lang.intent[ctx.global_.language]["transaction"][
+                            "do_not_have_sol"
+                        ],
+                        meta={
+                            "type": "wallet_list",
+                            "status": 200,
+                            "data": {},
+                        },
+                    )
+                    return
+
+                
+                token_info = await get_coin_info(
+                    ctx.global_.access_token, solana_contract, "Solana"
+                )
+                if not token_info["status"] == 200:
+                    yield ResponseChunk(
+                        answer_type="wrong_contract",
+                        text=mult_lang.intent[ctx.global_.language]["wrong_contract"],
+                        meta={
+                            "type": "",
+                            "status": token_info["status"],
+                            "data": token_info["data"],
+                        },
+                    )
+                    return
+
+                symbol = token_info["data"]["symbol"]
+
+                yield ResponseChunk(
+                    answer_type="transaction_confirm_stream",
+                    text=mult_lang.intent[ctx.global_.language]["contract"][
+                        "transaction_confirm"
+                    ],
+                    meta={
+                        "type": "transaction_confirm_buy",
+                        "status": 200,
+                        "data": {
+                            "from_token_name": "SOL",
+                            "from_token_contract": "So11111111111111111111111111111111111111112",
+                            "amount": from_amount,
+                            "to_token_name": symbol,
+                            "to_token_contract": solana_contract,
+                            "match_wallets": [],
+                            "address_filter": [
+                                "11111111111111111111111111111111",
+                                "So11111111111111111111111111111111111111112",
+                            ],
+                            "chain_filter": {"platform": "SOL", "chain_name": "Solana"},
+                        },
+                    },
+                )
+                return
+
+            
+            if tools_res.tool_calls[0].function.name == "selling_transaction":
+                to_token = "SOL"
+                to_amount = 0
+
+                
+                if solana_contract == "So11111111111111111111111111111111111111112":
+                    yield ResponseChunk(
+                        answer_type="do_not_support_sell_token",
+                        text=mult_lang.intent[ctx.global_.language]["transaction"][
+                            "do_not_support_sell_token"
+                        ],
+                        meta={
+                            "type": "do_not_support_sell_token",
+                            "status": 200,
+                            "data": {},
+                        },
+                    )
+                    return
+
+                
+                wallet_list_res = await wallet_list_api(
+                    access_token=ctx.global_.access_token
+                )
+
+                
+                if not wallet_list_res["status"] == 200:
+                    yield ResponseChunk(
+                        answer_type="get_wallet_wrong",
+                        text=mult_lang.intent[ctx.global_.language]["contract"][
+                            "transaction_fail"
+                        ],
+                        meta={
+                            "type": "contract_transaction_fail",
+                            "status": wallet_list_res["status"],
+                            "data": wallet_list_res["data"],
+                        },
+                    )
+                    return
+
+                
+                if len(wallet_list_res["data"]) < 1:
+                    yield ResponseChunk(
+                        answer_type="chat_stream",
+                        text=mult_lang.intent[ctx.global_.language]["wallet"][
+                            "do_not_have_wallet"
+                        ],
+                        meta={"type": "", "status": 200, "data": {}},
+                    )
+                    return
+
+                
+                match_wallets = get_wallet_list_by_token_contract(
+                    solana_contract, wallet_list_res["data"]
+                )
+
+                
+                if not match_wallets:
+                    yield ResponseChunk(
+                        answer_type="do_not_have_token",
+                        text=mult_lang.intent[ctx.global_.language]["transaction"][
+                            "do_not_have_token"
+                        ],
+                        meta={
+                            "type": "wallet_list",
+                            "status": 200,
+                            "data": {},
+                        },
+                    )
+                    return
+
+                
+                token_info = await get_coin_info(
+                    ctx.global_.access_token, solana_contract, "Solana"
+                )
+                if not token_info["status"] == 200:
+                    yield ResponseChunk(
+                        answer_type="wrong_contract",
+                        text=mult_lang.intent[ctx.global_.language]["wrong_contract"],
+                        meta={
+                            "type": "",
+                            "status": token_info["status"],
+                            "data": token_info["data"],
+                        },
+                    )
+                    return
+
+                
+                symbol = token_info["data"]["symbol"]
+
+                yield ResponseChunk(
+                    answer_type="transaction_confirm_stream",
+                    text=mult_lang.intent[ctx.global_.language]["contract"][
+                        "transaction_confirm"
+                    ],
+                    meta={
+                        "type": "transaction_confirm_sell",
+                        "status": 200,
+                        "data": {
+                            "from_token_name": symbol,
+                            "from_token_contract": solana_contract,
+                            "amount": to_amount,
+                            "to_token_name": "SOL",
+                            "to_token_contract": "So11111111111111111111111111111111111111112",
+                            "match_wallets": [],
+                            "address_filter": [solana_contract],
+                            "chain_filter": {"platform": "SOL", "chain_name": "Solana"},
+                        },
+                    },
+                )
+                return
+
+            
+            if tools_res.tool_calls[0].function.name == "monitor_address":
+                trade_params = [
+                    {"address": solana_contract, "name": "", "chain": "Solana"}
+                ]
+                subscript_res = await create_subscription(
+                    ctx.global_.access_token, 3, trade_params
+                )
+                if subscript_res["status"] == 200:
+                    text = mult_lang.intent[ctx.global_.language]["subscript"][
+                        "wallet_address_success"
+                    ]
+                    meta_type = "subscript_wallet_address_success"
+                else:
+                    text = mult_lang.intent[ctx.global_.language]["subscript"][
+                        "wallet_address_fail"
+                    ]
+                    meta_type = "subscript_wallet_address_fail"
+
+                yield ResponseChunk(
+                    answer_type="subscript_wallet_address",
+                    text=text,
+                    meta={"type": meta_type, "status": 200, "data": []},
+                )
+                return
+
+        else:
+            yield ResponseChunk(
+                answer_type="intent_history",
+                text=tools_res.content,
+                meta={
+                    "type": "",
+                    "status": 200,
+                    "data": [],
+                },
+            )
+            return
+
 
     inter_resp, ctx.entities = prepare.entity_extract(ctx)
     if inter_resp:
