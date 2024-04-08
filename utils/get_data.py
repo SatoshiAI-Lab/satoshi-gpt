@@ -1,5 +1,3 @@
-# 获取所有主体的别名few shot  返回一个字符串
-from re import L
 import re
 from models.models import Context
 
@@ -7,7 +5,7 @@ from models.models import Context
 def get_alias_few_shot(ctx: Context):
     alias_few_shot = ""
     for item in ctx.entities:
-        alias_few_shot += item.name + ",alias:" + ",".join(item.alias) + "\n"
+        alias_few_shot += item.name + "alias:" + ",".join(item.alias) + "\n"
     return alias_few_shot
 
 
@@ -17,6 +15,14 @@ def get_wallet_id_by_wallet_name(wallet_name: str, wallet_list: list):
             return item["id"]
 
     return None
+
+
+def get_wallet_id_by_question(question: str, wallet_list: list):
+    for item in wallet_list:
+        if item["name"].lower() in question.lower():
+            return item["id"], item["name"]
+
+    return None, None
 
 
 def get_the_chain_wallet_list(chain_name: str, wallet_list: list):
@@ -73,3 +79,5 @@ def get_exchange_id(exchange: str, lang: str = "en"):
             return value, [i for i in exchange_ids.keys()]
 
     return None, [i for i in exchange_ids.keys()]
+
+

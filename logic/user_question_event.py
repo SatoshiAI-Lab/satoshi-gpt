@@ -27,7 +27,7 @@ from logic import prepare
 from logic import token_info_fetch
 from datasource.tools_news_fluctuation import get_news_analysis_main
 from utils.change_text import extract_first_number
-from utils.check_data import find_contract_address_solana, is_single_token_query 
+from utils.check_data import check_which_subscript, find_contract_address_solana, is_single_token_query 
 from models.models import (
     ENTITYID2TYPE,
     ENTITYID2TYPE_EN,
@@ -40,12 +40,17 @@ from models.models import (
 from prompts.tools import (
     transaction_tools,
     transaction_system,
-    create_wallet_tools,
-    create_wallet_system,
+    wallet_tools,
+    wallet_system,
     contract_system,
-    contract_tools
+    contract_tools,
+    import_export_system,
+    import_export_tools,
+    subscript_tools,
+    subscript_system
 )
 from utils import mult_lang
+from utils.get_data import get_exchange_id, get_people_twitter_id, get_wallet_id_by_wallet_name
 
 async def question_event(ctx: Context):
     intent_history = []
@@ -56,7 +61,7 @@ async def question_event(ctx: Context):
             ctx.global_.uuid, ctx.intent_stream
         )
 
-     if ctx.intent_stream == "intent_history":
+    if ctx.intent_stream == "intent_history":
         intent_history, ctx.intent_stream = await get_history_intent(
             ctx.global_.uuid, ctx.intent_stream
         )
@@ -304,72 +309,18 @@ async def question_event(ctx: Context):
 
     
     if res_classify == "4":
-        yield ResponseChunk(
-            answer_type="chat_stream",
-            text="NFT server is comming soon",
-        )
-        return
-
-    
-    if res_classify == "5":
-        
         tools_res = await gpt_tools_no_stream(
-            create_wallet_system, ctx.question, create_wallet_tools, intent_history
+            import_export_system, ctx.question, import_export_tools, intent_history
         )
 
         if "tool_calls" in tools_res:
-            
-            if tools_res.tool_calls[0].function.name == "get_chain_name":
-                chain_name = json.loads(tools_res.tool_calls[0].function.arguments)[
-                    "chain_name"
-                ]
-
-                
-                format_chain_name = prepare.get_format_chain_name(str(chain_name))
-                if not format_chain_name:
-                    yield ResponseChunk(
-                        answer_type="intent_stream_4",
-                        text=mult_lang.intent[ctx.global_.language][
-                            "wrong_chain_name"
-                        ].format(chain_name),
-                    )
-                    return
-
-                
-                create_res = await create_wallet_api(
-                    format_chain_name, ctx.global_.access_token
-                )
-                text = (
-                    mult_lang.intent[ctx.global_.language]["wallet"][
-                        "create_success"
-                    ].format(create_res["data"]["address"])
-                    if create_res["status"] == 200
-                    else mult_lang.intent[ctx.global_.language]["wallet"]["create_fail"]
-                )
-
-                
-                yield ResponseChunk(
-                    answer_type="create_wallet_stream",
-                    text=text,
-                    meta=create_res["data"],
-                )
-                return
-
-            
-            if (
-                tools_res.tool_calls[0].function.name
-                == "get_private_key_and_chain_name"
-            ):
+            if tools_res.tool_calls[0].function.name == "import_private_key":
                 private_key = json.loads(tools_res.tool_calls[0].function.arguments)[
                     "private_key"
                 ]
-                chain_name = json.loads(tools_res.tool_calls[0].function.arguments)[
-                    "chain_name"
-                ]
-                
-                
-                
-                format_chain_name = prepare.get_format_chain_name(str(chain_name))
+                chain_name = "SOL"
+
+                format_chain_name = prepare.get_format_chain_name(chain_name)
                 if not format_chain_name:
                     yield ResponseChunk(
                         answer_type="intent_stream_4",
@@ -379,53 +330,255 @@ async def question_event(ctx: Context):
                     )
                     return
 
-                
                 import_res = await import_private_key_api(
-                    private_key, format_chain_name, ctx.global_.access_token
+                    ctx.global_.access_token,
+                    private_key,
+                    format_chain_name,
                 )
-                
                 text = (
                     mult_lang.intent[ctx.global_.language]["wallet"][
                         "import_success"
-                    ].format(import_res["data"]["address"])
+                    ].format(import_res["data"]["name"], import_res["data"]["address"])
                     if import_res["status"] == 200
                     else mult_lang.intent[ctx.global_.language]["wallet"]["import_fail"]
                 )
-                
-                
-                yield ResponseChunk(
-                    answer_type="import_wallet_stream",
-                    text=text,
-                    meta=import_res["data"],
-                )
-                return
 
-            
-            if tools_res.tool_calls[0].function.name == "get_wallet_list":
-                
                 wallet_list_res = await wallet_list_api(
                     access_token=ctx.global_.access_token
                 )
-                text = (
-                    mult_lang.intent[ctx.global_.language]["wallet"][
-                        "wallet_list_success"
-                    ]
-                    if wallet_list_res["status"] == 200
-                    else mult_lang.intent[ctx.global_.language]["wallet"][
-                        "wallet_list_fail"
-                    ]
-                )
-                
+                type_str = "wallet_list" if wallet_list_res["status"] == 200 else ""
                 yield ResponseChunk(
-                    answer_type="wallet_list_stream", text=text, meta=wallet_list_res
+                    answer_type="import_wallet_stream",
+                    text=text,
+                    meta={
+                        "type": type_str,
+                        "status": wallet_list_res["status"],
+                        "data": wallet_list_res["data"],
+                    },
                 )
                 return
+
+            if tools_res.tool_calls[0].function.name == "export_private_key":
+                wallet_name = json.loads(tools_res.tool_calls[0].function.arguments)[
+                    "wallet_name"
+                ]
+
+                wallet_list_res = await wallet_list_api(
+                    access_token=ctx.global_.access_token
+                )
+
+                if not wallet_list_res["status"] == 200:
+                    yield ResponseChunk(
+                        answer_type="intent_stream_4",
+                        text=mult_lang.intent[ctx.global_.language]["wallet"][
+                            "export_private_key_fail"
+                        ],
+                        meta={
+                            "type": "",
+                            "status": wallet_list_res["status"],
+                            "data": wallet_list_res["data"],
+                        },
+                    )
+                    return
+
+                wallet_id = get_wallet_id_by_wallet_name(
+                    wallet_name, wallet_list_res["data"]
+                )
+                if not wallet_id:
+                    yield ResponseChunk(
+                        answer_type="intent_stream_4",
+                        text=mult_lang.intent[ctx.global_.language][
+                            "wrong_wallet_name"
+                        ],
+                        meta={
+                            "type": "export_wallet_list",
+                            "status": wallet_list_res["status"],
+                            "data": wallet_list_res["data"],
+                        },
+                    )
+                    return
+
+                export_res = await export_private_key_api(
+                    ctx.global_.access_token, wallet_id
+                )
+                text = (
+                    mult_lang.intent[ctx.global_.language]["wallet"][
+                        "export_private_key_success"
+                    ].format(wallet_name, export_res["data"]["private_key"])
+                    if export_res["status"] == 200
+                    else mult_lang.intent[ctx.global_.language]["wallet"][
+                        "export_private_key_fail"
+                    ]
+                )
+                yield ResponseChunk(
+                    answer_type="export_private_key_stream",
+                    text=text,
+                    meta={
+                        "type": "",
+                        "status": export_res["status"],
+                        "data": export_res["data"],
+                    },
+                )
+                return
+
         else:
             yield ResponseChunk(
                 answer_type="intent_stream_4",
                 text=tools_res.content,
             )
             return
+
+    
+    if res_classify == "5":
+        tools_res = await gpt_tools_no_stream(
+            subscript_system, ctx.question, subscript_tools, intent_history
+        )
+
+        if "tool_calls" in tools_res:
+            if tools_res.tool_calls[0].function.name == "subscript_news":
+                switch = json.loads(tools_res.tool_calls[0].function.arguments)[
+                    "switch"
+                ]
+                subscript_res = await create_subscription(
+                    ctx.global_.access_token, 0, {"switch": switch}
+                )
+
+                if subscript_res["status"] == 200:
+                    switch_str = (
+                        "news_success" if switch == "on" else "news_cancel_success"
+                    )
+                    text = mult_lang.intent[ctx.global_.language]["subscript"][
+                        switch_str
+                    ]
+                else:
+                    text = mult_lang.intent[ctx.global_.language]["subscript"][
+                        "news_success"
+                    ]
+
+                yield ResponseChunk(
+                    answer_type="subscript_news",
+                    text=text,
+                )
+                return
+
+            if tools_res.tool_calls[0].function.name == "subscript_wallet_address":
+                wallet_address = json.loads(tools_res.tool_calls[0].function.arguments)[
+                    "wallet_address"
+                ]
+                trade_params = [{"address": wallet_address, "name": "", "chain": "SOL"}]
+                subscript_res = await create_subscription(
+                    ctx.global_.access_token, 3, trade_params
+                )
+                if subscript_res["status"] == 200:
+                    text = mult_lang.intent[ctx.global_.language]["subscript"][
+                        "wallet_address_success"
+                    ]
+                    meta_type = "subscript_wallet_address_success"
+                else:
+                    text = mult_lang.intent[ctx.global_.language]["subscript"][
+                        "wallet_address_fail"
+                    ]
+                    meta_type = "subscript_wallet_address_fail"
+
+                yield ResponseChunk(
+                    answer_type="subscript_wallet_address",
+                    text=text,
+                    meta={"type": meta_type, "status": 200, "data": []},
+                )
+                return
+
+            if tools_res.tool_calls[0].function.name == "subscript_twitter":
+                people_name = json.loads(tools_res.tool_calls[0].function.arguments)[
+                    "people_name"
+                ]
+                twitter_id, all_people = get_people_twitter_id(people_name)
+
+                subscript_res = await create_subscription(
+                    ctx.global_.access_token, 1, [twitter_id]
+                )
+
+                if subscript_res["status"] == 200:
+                    text = mult_lang.intent[ctx.global_.language]["subscript"][
+                        "twitter_success"
+                    ].format("people_name")
+                    meta_type = ""
+                    data = []
+                else:
+                    text = mult_lang.intent[ctx.global_.language]["subscript"][
+                        "twitter_fail"
+                    ]
+                    meta_type = "twitter_people_list"
+                    data = all_people
+
+                yield ResponseChunk(
+                    answer_type="subscript_twitter",
+                    text=text,
+                    meta={"type": meta_type, "status": 200, "data": data},
+                )
+                return
+
+            if (
+                tools_res.tool_calls[0].function.name
+                == "subscript_exchange_announcement"
+            ):
+                exchange_name = json.loads(tools_res.tool_calls[0].function.arguments)[
+                    "exchange_name"
+                ]
+
+                exchange_id, all_exchanges = get_exchange_id(exchange_name)
+
+                subscript_res = await create_subscription(
+                    ctx.global_.access_token, 2, [exchange_id]
+                )
+
+                if subscript_res["status"] == 200:
+                    text = mult_lang.intent[ctx.global_.language]["subscript"][
+                        "exchange_success"
+                    ].format(exchange_name)
+                    meta_type = ""
+                    data = []
+                else:
+                    text = mult_lang.intent[ctx.global_.language]["subscript"][
+                        "exchange_fail"
+                    ]
+                    meta_type = "exchanges_announcement_list"
+                    data = all_exchanges
+
+                yield ResponseChunk(
+                    answer_type="subscript_announcement",
+                    text=text,
+                    meta={"type": meta_type, "status": 200, "data": data},
+                )
+                return
+
+        else:
+            check_res = check_which_subscript(ctx.question)
+            data = {}
+            meta_type = ""
+            if check_res:
+                data = mult_lang.intent[ctx.global_.language]["subscript_list"][
+                    check_res
+                ]
+                meta_types = {
+                    "twitter": "subscript_twitter_list",
+                    "exchange": "subscript_announcement_list",
+                    "news": "",
+                    "pool": "",
+                    "trade": "",
+                }
+                meta_type = meta_types[check_res]
+
+            yield ResponseChunk(
+                answer_type="intent_stream_5",
+                text=tools_res.content,
+                meta={
+                    "type": meta_type,
+                    "status": 200,
+                    "data": [i for i in data.keys()],
+                },
+            )
+
+        return
 
     
     if res_classify == "6":
